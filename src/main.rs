@@ -1,24 +1,20 @@
-use std::env;
-use std::fs::File;
-use std::io::Write;
 use reqwest::blocking::get;
 use scraper::{Html, Selector};
+use std::env;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() != 2 {
-        eprintln!("Usage: {} <URL>", args[0]);
+        eprintln!("Usage: {} <ticker>", args[0]);
         std::process::exit(1);
     }
-    let url = &args[1];
+    let ticker = &args[1];
+    let url = get_quote_url_from_ticker(ticker);
 
-    match scrape_html(url) {
+    match scrape_html(url.as_str()) {
         Ok(html) => {
-            let filename = "output.html";
-            match save_to_file(&html, filename) {
-                Ok(_) => println!("Successfully saved HTML to {}", filename),
-                Err(e) => eprintln!("Error saving HTML to file: {}", e),
-            }
+            let div_texts = extract_data(&html);
+            println!("Price: {div_texts}");
         }
         Err(e) => eprintln!("Error fetching URL: {}", e),
     }
@@ -30,8 +26,25 @@ fn scrape_html(url: &str) -> Result<String, reqwest::Error> {
     Ok(html)
 }
 
-fn save_to_file(html: &str, filename: &str) -> std::io::Result<()> {
-    let mut file = File::create(filename)?;
-    file.write_all(html.as_bytes())?;
-    Ok(())
+fn extract_data(html: &str) -> String {
+    let document = Html::parse_document(html);
+    let div_selector = Selector::parse(r#"fin-streamer.Fw\(b\).Fz\(36px\)"#).unwrap();
+
+    let parsed_document: Vec<String> = document
+        .select(&div_selector)
+        .map(|element| element.inner_html())
+        .collect();
+    match parsed_document.len() {
+        1 => parsed_document.get(0).unwrap().to_owned(),
+        _ => panic!("Parsing failed"),
+    }
+}
+
+fn get_quote_url_from_ticker(ticker: &str) -> String {
+    let mut quote_url = "https://finance.yahoo.com/quote/".to_owned();
+    quote_url.push_str(ticker);
+    quote_url.push_str("?p=");
+    quote_url.push_str(ticker);
+
+    quote_url
 }
