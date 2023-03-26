@@ -13,3 +13,13 @@ cargo build --release
 ```
 
 The built broth binary will be located at `<path_to_cloned_repo>/target/release/broth` 
+<br><br>
+
+
+# Running broth
+Navigate to where the broth binary is installed, then run
+
+```
+./broth <commands> ...
+```
+
