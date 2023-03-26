@@ -1,4 +1,5 @@
 # broth
+
 Real-time stock data scrapper written in Rust
 * No fees
 * No API Keys
@@ -22,4 +23,7 @@ Navigate to where the broth binary is installed, then run
 ```
 ./broth <commands> ...
 ```
+
+## Notes
+* broth is a work in progress
 
