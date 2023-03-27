@@ -9,12 +9,14 @@ fn main() {
         std::process::exit(1);
     }
     let ticker = &args[1];
-    let url = get_quote_url_from_ticker(ticker);
+    let url = get_summary_url_from_ticker(ticker);
 
-    match scrape_html(url.as_str()) {
+    match scrape_html(&url) {
         Ok(html) => {
-            let div_texts = extract_data(&html);
-            println!("Price: {div_texts}");
+            let full_name = extract_full_name(&html);
+            let price = extract_price(&html);
+            println!("{full_name}");
+            println!("Price: {price}");
         }
         Err(e) => eprintln!("Error fetching URL: {}", e),
     }
@@ -26,9 +28,23 @@ fn scrape_html(url: &str) -> Result<String, reqwest::Error> {
     Ok(html)
 }
 
-fn extract_data(html: &str) -> String {
+fn extract_price(html: &str) -> String {
     let document = Html::parse_document(html);
-    let div_selector = Selector::parse(r#"fin-streamer.Fw\(b\).Fz\(36px\)"#).unwrap();
+    let div_selector = Selector::parse(r#"[data-test-id='symbol-price']"#).unwrap();
+
+    let parsed_document: Vec<String> = document
+        .select(&div_selector)
+        .map(|element| element.inner_html())
+        .collect();
+    match parsed_document.len() {
+        1 => parsed_document.get(0).unwrap().replace("<!-- -->", ""),
+        _ => panic!("Parsing failed"),
+    }
+}
+
+fn extract_full_name(html: &str) -> String {
+    let document = Html::parse_document(html);
+    let div_selector = Selector::parse(r#"[data-test-id='symbol-full-name']"#).unwrap();
 
     let parsed_document: Vec<String> = document
         .select(&div_selector)
@@ -40,10 +56,8 @@ fn extract_data(html: &str) -> String {
     }
 }
 
-fn get_quote_url_from_ticker(ticker: &str) -> String {
-    let mut quote_url = "https://finance.yahoo.com/quote/".to_owned();
-    quote_url.push_str(ticker);
-    quote_url.push_str("?p=");
+fn get_summary_url_from_ticker(ticker: &str) -> String {
+    let mut quote_url = "https://seekingalpha.com/symbol/".to_owned();
     quote_url.push_str(ticker);
 
     quote_url
