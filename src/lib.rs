@@ -1,4 +1,4 @@
-use std::{error::Error, fmt};
+use std::{error::Error, fmt, fs::File, io::Write};
 
 use html_escape::decode_html_entities_to_string;
 use reqwest::blocking::get;
@@ -43,7 +43,7 @@ pub fn run(command: Command) -> Result<(), Box<dyn Error>> {
     let url = get_summary_url_from_ticker(&command.ticker);
     let html = fetch_html(&url).unwrap();
     match command.mode.to_lowercase().as_str() {
-        "quote" => println!("{}", extract_price(&html)?),
+        "quote" => println!("{}", extract_price(&html, &command.ticker)?),
         "fullname" => println!("{}", extract_full_name(&html)?),
         _ => return Err(Box::new(BrothError("invalid mode"))),
     }
@@ -57,8 +57,9 @@ pub fn fetch_html(url: &str) -> Result<scraper::html::Html, reqwest::Error> {
     Ok(html_object)
 }
 
-pub fn extract_price(html: &scraper::html::Html) -> Result<String, Box<dyn Error>> {
-    let div_selector = Selector::parse(r#"[data-test-id='symbol-price']"#)?;
+pub fn extract_price(html: &scraper::html::Html, ticker: &str) -> Result<String, Box<dyn Error>> {
+    let selector_string = format!(r#"fin-streamer[data-field="regularMarketPrice"][data-symbol="{}"]"#, ticker);
+    let div_selector = Selector::parse(&selector_string).unwrap();
 
     let parsed_document: Vec<String> = html
         .select(&div_selector)
@@ -74,7 +75,7 @@ pub fn extract_price(html: &scraper::html::Html) -> Result<String, Box<dyn Error
 }
 
 pub fn extract_full_name(html: &scraper::html::Html) -> Result<String, Box<dyn Error>> {
-    let div_selector = Selector::parse(r#"[data-test-id='symbol-full-name']"#)?;
+    let div_selector = Selector::parse(r#"h1.D\(ib\).Fz\(18px\)"#).unwrap(); 
 
     let parsed_document: Vec<String> = html
         .select(&div_selector)
@@ -94,7 +95,16 @@ pub fn extract_full_name(html: &scraper::html::Html) -> Result<String, Box<dyn E
 }
 
 pub fn get_summary_url_from_ticker(ticker: &str) -> String {
-    let mut quote_url = "https://seekingalpha.com/symbol/".to_owned();
+    let mut quote_url = "https://finance.yahoo.com/quote/".to_owned();
+    quote_url.push_str(ticker);
+    quote_url.push_str("?p=");
     quote_url.push_str(ticker);
     quote_url
+}
+
+
+fn _save_to_file(html: &str, filename: &str) -> std::io::Result<()> {
+    let mut file = File::create(filename)?;
+    file.write_all(html.as_bytes())?;
+    Ok(())
 }
