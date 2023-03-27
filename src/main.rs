@@ -1,6 +1,7 @@
 use reqwest::blocking::get;
 use scraper::{Html, Selector};
 use std::env;
+use html_escape::decode_html_entities_to_string;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -51,7 +52,12 @@ fn extract_full_name(html: &str) -> String {
         .map(|element| element.inner_html())
         .collect();
     match parsed_document.len() {
-        1 => parsed_document.get(0).unwrap().to_owned(),
+        1 => {
+            let price = parsed_document.get(0).unwrap().to_owned();
+            let mut decoded_price = String::new();
+            decode_html_entities_to_string(price, &mut decoded_price);
+            decoded_price
+        }
         _ => panic!("Parsing failed"),
     }
 }
