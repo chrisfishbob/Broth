@@ -12,28 +12,28 @@ fn main() {
     let ticker = &args[1];
     let url = get_summary_url_from_ticker(ticker);
 
-    match scrape_html(&url) {
+    match fetch_html(&url) {
         Ok(html) => {
             let full_name = extract_full_name(&html);
             let price = extract_price(&html);
             println!("{full_name}");
-            println!("Price: {price}");
+            println!("{price}");
         }
         Err(e) => eprintln!("Error fetching URL: {}", e),
     }
 }
 
-fn scrape_html(url: &str) -> Result<String, reqwest::Error> {
+fn fetch_html(url: &str) -> Result<scraper::html::Html, reqwest::Error> {
     let response = get(url)?;
-    let html = response.text()?;
-    Ok(html)
+    let html_string = response.text()?;
+    let html_object = Html::parse_document(&html_string);
+    Ok(html_object)
 }
 
-fn extract_price(html: &str) -> String {
-    let document = Html::parse_document(html);
+fn extract_price(html: &scraper::html::Html) -> String {
     let div_selector = Selector::parse(r#"[data-test-id='symbol-price']"#).unwrap();
 
-    let parsed_document: Vec<String> = document
+    let parsed_document: Vec<String> = html
         .select(&div_selector)
         .map(|element| element.inner_html())
         .collect();
@@ -43,20 +43,19 @@ fn extract_price(html: &str) -> String {
     }
 }
 
-fn extract_full_name(html: &str) -> String {
-    let document = Html::parse_document(html);
+fn extract_full_name(html: &scraper::html::Html) -> String {
     let div_selector = Selector::parse(r#"[data-test-id='symbol-full-name']"#).unwrap();
 
-    let parsed_document: Vec<String> = document
+    let parsed_document: Vec<String> = html
         .select(&div_selector)
         .map(|element| element.inner_html())
         .collect();
     match parsed_document.len() {
         1 => {
-            let price = parsed_document.get(0).unwrap().to_owned();
-            let mut decoded_price = String::new();
-            decode_html_entities_to_string(price, &mut decoded_price);
-            decoded_price
+            let name = parsed_document.get(0).unwrap().to_owned();
+            let mut decoded_name = String::new();
+            decode_html_entities_to_string(name, &mut decoded_name);
+            decoded_name
         }
         _ => panic!("Parsing failed"),
     }
