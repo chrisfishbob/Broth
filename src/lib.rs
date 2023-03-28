@@ -65,12 +65,12 @@ pub fn extract_price(html: &scraper::html::Html, ticker: &str) -> Result<String,
         .select(&div_selector)
         .map(|element| element.inner_html())
         .collect();
-    match parsed_document.len() {
-        1 => {
+    match parsed_document.len() > 0 {
+        true => {
             let price = parsed_document.get(0).unwrap().replace("<!-- -->", "");
             Ok(price)
         }
-        _ => Err(Box::new(BrothError("failed to extract price from ticker"))),
+        false => Err(Box::new(BrothError("failed to extract price from ticker"))),
     }
 }
 
@@ -95,10 +95,9 @@ pub fn extract_full_name(html: &scraper::html::Html) -> Result<String, Box<dyn E
 }
 
 pub fn get_summary_url_from_ticker(ticker: &str) -> String {
+    let encoded_ticker = urlencoding::encode(ticker);
     let mut quote_url = "https://finance.yahoo.com/quote/".to_owned();
-    quote_url.push_str(ticker);
-    quote_url.push_str("?p=");
-    quote_url.push_str(ticker);
+    quote_url.push_str(&encoded_ticker);
     quote_url
 }
 
