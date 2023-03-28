@@ -6,11 +6,11 @@ use scraper::{Html, Selector};
 
 // Custom error type
 #[derive(Debug)]
-struct BrothError(&'static str);
+struct BrothError(String);
 
 impl fmt::Display for BrothError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.0)
+        write!(f, "{}", self.0)
     }
 }
 
@@ -26,7 +26,8 @@ pub struct Command {
 impl Command {
     pub fn build(args: &[String]) -> Result<Command, &'static str> {
         if args.len() < 3 {
-            return Err("Not enough arguments");
+            print_usage_instructions();
+            std::process::exit(1);
         }
         let mode = args[1].clone();
         let ticker = args[2].clone();
@@ -43,11 +44,30 @@ pub fn run(command: Command) -> Result<(), Box<dyn Error>> {
     let url = get_summary_url_from_ticker(&command.ticker);
     let html = fetch_html(&url).unwrap();
     match command.mode.to_lowercase().as_str() {
-        "quote" => println!("{}", extract_price(&html, &command.ticker)?),
-        "fullname" => println!("{}", extract_full_name(&html)?),
-        _ => return Err(Box::new(BrothError("invalid mode"))),
+        "quote" | "fullname" | "pe" | "open" | "close" | "pricechange" | "percentchange" => {
+            let query_string = get_query_string(&command);
+            println!("{}", scrape_element(&html, &command.mode, &query_string)?)
+        }
+        _ => return Err(Box::new(BrothError("invalid mode".to_owned()))),
     }
     Ok(())
+}
+
+fn get_query_string(command: &Command) -> String {
+    let query_string = match command.mode.as_str() {
+        "quote" => format!(
+            r#"fin-streamer[data-field="regularMarketPrice"][data-symbol="{}"]"#,
+            command.ticker
+        ),
+        "fullname" => r#"h1.D\(ib\).Fz\(18px\)"#.to_owned(),
+        "pe" => r#"td[data-test="PE_RATIO-value"]"#.to_owned(),
+        "open" => r#"td[data-test="OPEN-value"]"#.to_owned(),
+        "close" => r#"td[data-test="PREV_CLOSE-value"]"#.to_owned(),
+        "pricechange" => r#"fin-streamer[data-test="qsp-price-change"] span"#.to_owned(), 
+        "percentchange" => r#"fin-streamer[data-field="regularMarketChangePercent"] span"#.to_owned(), 
+        _ => panic!("Critical error: unable to get query_string"),
+    };
+    query_string
 }
 
 pub fn fetch_html(url: &str) -> Result<scraper::html::Html, reqwest::Error> {
@@ -57,8 +77,11 @@ pub fn fetch_html(url: &str) -> Result<scraper::html::Html, reqwest::Error> {
     Ok(html_object)
 }
 
-pub fn extract_price(html: &scraper::html::Html, ticker: &str) -> Result<String, Box<dyn Error>> {
-    let selector_string = format!(r#"fin-streamer[data-field="regularMarketPrice"][data-symbol="{}"]"#, ticker);
+pub fn scrape_element(
+    html: &scraper::html::Html,
+    scrape_target: &str,
+    selector_string: &str,
+) -> Result<String, Box<dyn Error>> {
     let div_selector = Selector::parse(&selector_string).unwrap();
 
     let parsed_document: Vec<String> = html
@@ -67,30 +90,18 @@ pub fn extract_price(html: &scraper::html::Html, ticker: &str) -> Result<String,
         .collect();
     match parsed_document.len() > 0 {
         true => {
-            let price = parsed_document.get(0).unwrap().replace("<!-- -->", "");
-            Ok(price)
+            let scarped_element = parsed_document.get(0).unwrap().to_owned();
+            let mut decoded_element = String::new();
+            decode_html_entities_to_string(scarped_element, &mut decoded_element);
+            Ok(decoded_element)
         }
-        false => Err(Box::new(BrothError("failed to extract price from ticker"))),
-    }
-}
-
-pub fn extract_full_name(html: &scraper::html::Html) -> Result<String, Box<dyn Error>> {
-    let div_selector = Selector::parse(r#"h1.D\(ib\).Fz\(18px\)"#).unwrap(); 
-
-    let parsed_document: Vec<String> = html
-        .select(&div_selector)
-        .map(|element| element.inner_html())
-        .collect();
-    match parsed_document.len() {
-        1 => {
-            let name = parsed_document.get(0).unwrap().to_owned();
-            let mut decoded_name = String::new();
-            decode_html_entities_to_string(name, &mut decoded_name);
-            Ok(decoded_name)
+        false => {
+            let error_message = format!(
+                "Failed to scrape {scrape_target}.\nparsed_document: {:?}",
+                parsed_document
+            );
+            Err(Box::new(BrothError(error_message)))
         }
-        _ => Err(Box::new(BrothError(
-            "failed to extract full comany name from ticker",
-        ))),
     }
 }
 
@@ -101,9 +112,14 @@ pub fn get_summary_url_from_ticker(ticker: &str) -> String {
     quote_url
 }
 
-
 fn _save_to_file(html: &str, filename: &str) -> std::io::Result<()> {
     let mut file = File::create(filename)?;
     file.write_all(html.as_bytes())?;
     Ok(())
+}
+
+fn print_usage_instructions() {
+    println!("usage: broth <mode> <ticker> [<flags> ...]\n");
+    println!("available modes:");
+    println!("\tquote, fullname, pe, open, close, pricechange, percentchange\n");
 }
