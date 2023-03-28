@@ -20,7 +20,7 @@ impl std::error::Error for BrothError {}
 pub struct Command {
     mode: String,
     ticker: String,
-    _optional_flag: Option<String>,
+    optional_flag: Option<String>,
 }
 
 impl Command {
@@ -31,11 +31,16 @@ impl Command {
         }
         let mode = args[1].clone();
         let ticker = args[2].clone();
+        let optional_flag = if args.len() == 4 {
+            Some(args[3].clone())
+        } else {
+            None
+        };
 
         Ok(Command {
             mode,
             ticker,
-            _optional_flag: None,
+            optional_flag,
         })
     }
 }
@@ -43,28 +48,41 @@ impl Command {
 pub fn run(command: Command) -> Result<(), Box<dyn Error>> {
     let url = get_summary_url_from_ticker(&command.ticker);
     let html = fetch_html(&url).unwrap();
-    match command.mode.to_lowercase().as_str() {
-        "quote" | "fullname" | "pe" | "open" | "close" | "pricechange" | "percentchange" => {
-            let query_string = get_query_string(&command);
-            println!("{}", scrape_element(&html, &command.mode, &query_string)?)
+    match command {
+        Command {
+            mode,
+            ticker,
+            optional_flag: None,
+        } => {
+            let query_string = get_query_string(&mode, &ticker);
+            println!("{}", scrape_element(&html, &mode, &query_string)?)
         }
-        _ => return Err(Box::new(BrothError("invalid mode".to_owned()))),
+        Command {
+            optional_flag: Some(_),
+            ..
+        } => {
+            return Err(Box::new(BrothError(
+                "optional flags not yet supprted".to_owned(),
+            )))
+        }
     }
     Ok(())
 }
 
-fn get_query_string(command: &Command) -> String {
-    let query_string = match command.mode.as_str() {
+fn get_query_string(mode: &str, ticker: &str) -> String {
+    let query_string = match mode {
         "quote" => format!(
             r#"fin-streamer[data-field="regularMarketPrice"][data-symbol="{}"]"#,
-            command.ticker
+            ticker
         ),
         "fullname" => r#"h1.D\(ib\).Fz\(18px\)"#.to_owned(),
         "pe" => r#"td[data-test="PE_RATIO-value"]"#.to_owned(),
         "open" => r#"td[data-test="OPEN-value"]"#.to_owned(),
         "close" => r#"td[data-test="PREV_CLOSE-value"]"#.to_owned(),
-        "pricechange" => r#"fin-streamer[data-test="qsp-price-change"] span"#.to_owned(), 
-        "percentchange" => r#"fin-streamer[data-field="regularMarketChangePercent"] span"#.to_owned(), 
+        "pricechange" => r#"fin-streamer[data-test="qsp-price-change"] span"#.to_owned(),
+        "percentchange" => {
+            r#"fin-streamer[data-field="regularMarketChangePercent"] span"#.to_owned()
+        }
         _ => panic!("Critical error: unable to get query_string"),
     };
     query_string
