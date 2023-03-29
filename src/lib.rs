@@ -3,6 +3,8 @@ use std::{error::Error, fmt, fs::File, io::Write};
 use html_escape::decode_html_entities_to_string;
 use reqwest::blocking::get;
 use scraper::{Html, Selector};
+use termion::cursor::Up;
+use termion::clear::CurrentLine;
 
 // Custom error type
 #[derive(Debug)]
@@ -58,13 +60,24 @@ pub fn run(command: Command) -> Result<(), Box<dyn Error>> {
             println!("{}", scrape_element(&html, &mode, &query_string)?)
         }
         Command {
-            optional_flag: Some(_),
-            ..
-        } => {
-            return Err(Box::new(BrothError(
-                "optional flags not yet supprted".to_owned(),
-            )))
+            mode,
+            ticker,
+            optional_flag: Some(flag),
+        } if flag == "--stream" => {
+            loop {
+                let html = fetch_html(&url).unwrap();
+                let query_string = get_query_string(&mode, &ticker);
+                let price = scrape_element(&html, &mode, &query_string)?;
+                // Move the cursor up and clear the line before printing the updated value
+                println!("{price}");
+                print!("{}{}", Up(1), CurrentLine);
+            }
         }
+        _ => {
+            return Err(Box::new(BrothError(
+                "flag not yet supprted".to_owned(),
+            )))
+        } 
     }
     Ok(())
 }
