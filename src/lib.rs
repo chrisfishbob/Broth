@@ -1,40 +1,42 @@
-use std::{error::Error, fmt, fs::File, io::Write};
+mod broth_error;
+use std::{error::Error, fs::File, io::Write};
 
 use html_escape::decode_html_entities_to_string;
 use reqwest::blocking::get;
 use scraper::{Html, Selector};
-use termion::cursor::Up;
-use termion::clear::CurrentLine;
+use termion::{clear::AfterCursor, cursor::Up};
+use colored::{self, Colorize};
 
-// Custom error type
-#[derive(Debug)]
-struct BrothError(String);
 
-impl fmt::Display for BrothError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
+const SUMMARY_ELEMENTS: [&str; 7] = [
+    "fullname",
+    "quote",
+    "pricechange",
+    "percentchange",
+    "open",
+    "close",
+    "pe",
+];
+const HEADER_LENGTH: usize = 2;
 
-impl std::error::Error for BrothError {}
 
 // Encapsulates the commandline args
-pub struct Command {
-    mode: String,
-    ticker: String,
-    optional_flag: Option<String>,
+pub struct Command<'a> {
+    pub mode: &'a str,
+    pub ticker: &'a str,
+    pub optional_flag: Option<&'a str>,
 }
 
-impl Command {
+impl<'a> Command<'a> {
     pub fn build(args: &[String]) -> Result<Command, &'static str> {
         if args.len() < 3 {
             print_usage_instructions();
             std::process::exit(1);
         }
-        let mode = args[1].clone();
-        let ticker = args[2].clone();
+        let mode = &args[1];
+        let ticker = &args[2];
         let optional_flag = if args.len() == 4 {
-            Some(args[3].clone())
+            Some(args[3].as_str())
         } else {
             None
         };
@@ -47,55 +49,98 @@ impl Command {
     }
 }
 
+struct StockInfo {
+    fullname: String,
+    quote: String,
+    pricechange: String,
+    percentchange: String,
+    open: String,
+    close: String,
+    pe: String,
+}
+
+impl StockInfo {
+    fn build(html: &scraper::html::Html, ticker: &str) -> Result<Self, Box<dyn Error>> {
+        let fullname = scrape_element(&html, "fullname", ticker)?;
+        let quote = scrape_element(&html, "quote", ticker)?;
+        let pricechange = scrape_element(&html, "pricechange", ticker)?;
+        let percentchange = scrape_element(&html, "percentchange", ticker)?;
+        let open = scrape_element(&html, "open", ticker)?;
+        let close = scrape_element(&html, "close", ticker)?;
+        let pe = scrape_element(&html, "pe", ticker).unwrap_or("N/A".to_owned());
+
+        Ok(Self {
+            fullname,
+            quote,
+            pricechange,
+            percentchange,
+            open,
+            close,
+            pe,
+        })
+    }
+}
+
 pub fn run(command: Command) -> Result<(), Box<dyn Error>> {
     let url = get_summary_url_from_ticker(&command.ticker);
-    let html = fetch_html(&url).unwrap();
     match command {
         Command {
-            mode,
+            mode: "summary",
             ticker,
-            optional_flag: None,
-        } => {
-            let query_string = get_query_string(&mode, &ticker);
-            println!("{}", scrape_element(&html, &mode, &query_string)?)
-        }
-        Command {
-            mode,
-            ticker,
-            optional_flag: Some(flag),
-        } if flag == "--stream" => {
-            loop {
-                let html = fetch_html(&url).unwrap();
-                let query_string = get_query_string(&mode, &ticker);
-                let price = scrape_element(&html, &mode, &query_string)?;
-                // Move the cursor up and clear the line before printing the updated value
-                println!("{price}");
-                print!("{}{}", Up(1), CurrentLine);
+            optional_flag,
+        } => loop {
+            let html = fetch_html(&url).unwrap();
+            let info = StockInfo::build(&html, ticker)?;
+            display_summary(&info);
+            match optional_flag {
+                Some("--stream") => {
+                    print!(
+                        "{}{}",
+                        Up((SUMMARY_ELEMENTS.len() + HEADER_LENGTH) as u16),
+                        AfterCursor
+                    )
+                }
+                _ => break,
             }
-        }
-        _ => {
-            return Err(Box::new(BrothError(
-                "flag not yet supprted".to_owned(),
-            )))
-        } 
+        },
+        _ => return Err(broth_error::BrothError::new("flag not yet supported")),
     }
     Ok(())
+}
+
+fn display_summary(info: &StockInfo) {
+    let price_change_float: f32 = info.pricechange.parse().unwrap();
+    println!("{}", "#".repeat(info.fullname.len()));
+    println!("{}", info.fullname);
+    println!("{}", "#".repeat(info.fullname.len()));
+    print!("quote: ");
+    if price_change_float >= 0.0 {
+        println!("{}", info.quote.green());
+    } else {
+        println!("{}", info.quote.red());
+    }
+    println!("pricechange: {}", info.pricechange);
+    println!("percentchange: {}", info.percentchange);
+    println!("open: {}", info.open);
+    println!("close: {}", info.close);
+    println!("pe: {}", info.pe);
 }
 
 fn get_query_string(mode: &str, ticker: &str) -> String {
     let query_string = match mode {
         "quote" => format!(
             r#"fin-streamer[data-field="regularMarketPrice"][data-symbol="{}"]"#,
-            ticker
+            ticker.to_uppercase()
         ),
         "fullname" => r#"h1.D\(ib\).Fz\(18px\)"#.to_owned(),
         "pe" => r#"td[data-test="PE_RATIO-value"]"#.to_owned(),
         "open" => r#"td[data-test="OPEN-value"]"#.to_owned(),
         "close" => r#"td[data-test="PREV_CLOSE-value"]"#.to_owned(),
         "pricechange" => r#"fin-streamer[data-test="qsp-price-change"] span"#.to_owned(),
-        "percentchange" => {
-            r#"fin-streamer[data-field="regularMarketChangePercent"] span"#.to_owned()
-        }
+        "percentchange" => format!(
+            r#"fin-streamer[data-field="regularMarketChangePercent"][data-symbol="{}"] span"#,
+            ticker.to_uppercase()
+        ),
         _ => panic!("Critical error: unable to get query_string"),
     };
     query_string
@@ -111,8 +156,9 @@ pub fn fetch_html(url: &str) -> Result<scraper::html::Html, reqwest::Error> {
 pub fn scrape_element(
     html: &scraper::html::Html,
     scrape_target: &str,
-    selector_string: &str,
+    ticker: &str,
 ) -> Result<String, Box<dyn Error>> {
+    let selector_string = get_query_string(scrape_target, ticker);
     let div_selector = Selector::parse(&selector_string).unwrap();
 
     let parsed_document: Vec<String> = html
@@ -131,7 +177,7 @@ pub fn scrape_element(
                 "Failed to scrape {scrape_target}.\nparsed_document: {:?}",
                 parsed_document
             );
-            Err(Box::new(BrothError(error_message)))
+            Err(broth_error::BrothError::new(&error_message))
         }
     }
 }
